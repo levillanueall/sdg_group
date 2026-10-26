@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: sdg_postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: sdg_user
+      POSTGRES_PASSWORD: sdg_password
+      POSTGRES_DB: sdg_churn
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
