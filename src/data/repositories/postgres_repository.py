@@ -54,3 +54,72 @@ class PostgresRepository:
         with self.connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(query)
+
+    
+    def insert_batch(
+        self,
+        connection,
+        schema: str,
+        table: str,
+        columns: list[str],
+        rows: list[dict]
+    ) -> int:
+
+        if not rows:
+            return 0
+
+        query = sql.SQL(
+            "INSERT INTO {} ({}) VALUES ({})"
+        ).format(
+            sql.Identifier(schema, table),
+            sql.SQL(", ").join(
+                sql.Identifier(column)
+                for column in columns
+            ),
+            sql.SQL(", ").join(
+                sql.Placeholder()
+                for _ in columns
+            )
+        )
+
+        values = [
+            tuple(row[column] for column in columns)
+            for row in rows
+        ]
+
+        with connection.cursor() as cursor:
+            cursor.executemany(query, values)
+
+        return len(rows)
+
+    def truncate_table(
+            self,
+            connection,
+            schema: str,
+            table: str
+        ) -> None:
+
+            query = sql.SQL(
+                "TRUNCATE TABLE {}"
+            ).format(
+                sql.Identifier(schema, table)
+            )
+
+            with connection.cursor() as cursor:
+                cursor.execute(query)
+
+    
+    def create_schema(
+        self,
+        schema: str
+    ) -> None:
+
+        query = sql.SQL(
+            "CREATE SCHEMA IF NOT EXISTS {}"
+        ).format(
+            sql.Identifier(schema)
+        )
+
+        with self.connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query)
