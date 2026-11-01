@@ -1,5 +1,7 @@
 import psycopg
 from psycopg import sql
+from collections.abc import Iterator
+from psycopg.rows import dict_row
 
 
 class PostgresRepository:
@@ -123,3 +125,136 @@ class PostgresRepository:
         with self.connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(query)
+
+    def read_batches(
+        self,
+        schema: str,
+        table: str,
+        batch_size: int = 1000
+    ) -> Iterator[list[dict]]:
+
+        if batch_size <= 0:
+            raise ValueError("batch_size debe ser mayor que cero.")
+
+        query = sql.SQL(
+            "SELECT * FROM {}"
+        ).format(
+            sql.Identifier(schema, table)
+        )
+
+        with self.connect() as connection:
+            with connection.cursor(
+                name="table_reader",
+                row_factory=dict_row
+            ) as cursor:
+                cursor.execute(query)
+
+                while True:
+                    batch = cursor.fetchmany(batch_size)
+
+                    if not batch:
+                        break
+
+                    yield batch
+    
+    
+    def create_typed_table(
+        self,
+        schema: str,
+        table: str,
+        column_types: dict[str, str]
+    ) -> None:
+
+        if not column_types:
+            raise ValueError("El mapa de tipos está vacío.")
+
+        postgres_types = {
+            "string": "TEXT",
+            "numeric": "NUMERIC"
+        }
+
+        column_definitions = []
+
+        for column, column_type in column_types.items():
+            if column_type not in postgres_types:
+                raise ValueError(
+                    f"Tipo no soportado para {column}: {column_type}"
+                )
+
+            column_definitions.append(
+                sql.SQL("{} {}").format(
+                    sql.Identifier(column),
+                    sql.SQL(postgres_types[column_type])
+                )
+            )
+
+        query = sql.SQL(
+            "CREATE TABLE IF NOT EXISTS {} ({})"
+        ).format(
+            sql.Identifier(schema, table),
+            sql.SQL(", ").join(column_definitions)
+        )
+
+        with self.connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query)
+    
+    
+    def count_rows(
+        self,
+        schema: str,
+        table: str
+    ) -> int:
+
+        query = sql.SQL(
+            "SELECT COUNT(*) FROM {}"
+        ).format(
+            sql.Identifier(schema, table)
+        )
+
+        with self.connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query)
+                return cursor.fetchone()[0]
+
+    def get_table_columns(
+        self,
+        schema: str,
+        table: str
+    ) -> dict[str, str]:
+
+        query = """
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_schema = %s
+              AND table_name = %s
+            ORDER BY ordinal_position
+        """
+
+        with self.connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query, (schema, table))
+                return dict(cursor.fetchall())
+    
+    def read_by_ids(
+        self,
+        schema: str,
+        table: str,
+        identifiers: list[str],
+        key_column: str = "Customer_ID"
+    ) -> list[dict]:
+
+        if not identifiers:
+            return []
+
+        query = sql.SQL(
+            "SELECT * FROM {} WHERE {} = ANY(%s)"
+        ).format(
+            sql.Identifier(schema, table),
+            sql.Identifier(key_column)
+        )
+
+        with self.connect() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(query, (identifiers,))
+                return cursor.fetchall()
