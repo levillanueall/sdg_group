@@ -258,3 +258,56 @@ class PostgresRepository:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(query, (identifiers,))
                 return cursor.fetchall()
+    
+    def get_value_counts(
+        self,
+        schema: str,
+        table: str,
+        column: str
+    ) -> list[dict]:
+
+        query = sql.SQL("""
+            SELECT
+                {} AS value,
+                COUNT(*) AS count
+            FROM {}
+            GROUP BY {}
+            ORDER BY COUNT(*) DESC
+        """).format(
+            sql.Identifier(column),
+            sql.Identifier(schema, table),
+            sql.Identifier(column)
+        )
+
+        with self.connect() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(query)
+                return cursor.fetchall()
+
+    def get_missing_counts(
+        self,
+        schema: str,
+        table: str,
+        column: str
+    ) -> dict:
+
+        query = sql.SQL("""
+            SELECT
+                COUNT(*) AS total_rows,
+                COUNT(*) FILTER (
+                    WHERE {} IS NULL
+                ) AS null_count,
+                COUNT(*) FILTER (
+                    WHERE {}::text = ''
+                ) AS empty_count
+            FROM {}
+        """).format(
+            sql.Identifier(column),
+            sql.Identifier(column),
+            sql.Identifier(schema, table)
+        )
+
+        with self.connect() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(query)
+                return cursor.fetchone()

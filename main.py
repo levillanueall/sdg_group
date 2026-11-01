@@ -7,6 +7,8 @@ from src.data.validators.silver_validator import SilverValidator
 from src.transformations.data_type_transformer import DataTypeTransformer
 from src.orchestration.data_orchestrator import DataOrchestrator
 
+from src.eda.churn_eda import ChurnEDA
+
 
 def main():
 
@@ -40,13 +42,19 @@ def main():
         repository=repository
     )
 
+    churn_eda = ChurnEDA(
+        repository=repository
+    )
+
     data_orchestrator = DataOrchestrator(
         stages={
             "bronze": bronze_ingestion.ingest,
             "silver": silver_ingestion.ingest,
             "validate_silver": silver_validator.validate_structure,
             "validate_silver_ids": silver_validator.validate_identifiers,
-            "validate_silver_values": silver_validator.validate_values
+            "validate_silver_values": silver_validator.validate_values,
+            "eda_target": churn_eda.analyze_target,
+            "eda_missing": churn_eda.analyze_missing_values
         }
     )
 
@@ -114,3 +122,17 @@ if __name__ == "__main__":
     )
 
     print(values_result)
+
+    target_result = orchestrator.run(
+        stage="eda_target"
+    )
+
+    print(target_result)
+
+    
+    missing_result = orchestrator.run(
+        stage="eda_missing"
+    )
+
+    for column_result in missing_result:
+        print(column_result)
