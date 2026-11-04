@@ -37,17 +37,12 @@ class GoldIngestion:
                 if not batch:
                     continue
 
-                rows = [
-                    tuple(row[column] for column in columns)
-                    for row in batch
-                ]
-
                 inserted_rows += self.repository.insert_batch(
                     connection=connection,
                     schema=schema,
                     table=table_name,
                     columns=columns,
-                    rows=rows
+                    rows=batch
                 )
 
         return {

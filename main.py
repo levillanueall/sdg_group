@@ -8,6 +8,7 @@ from src.transformations.data_type_transformer import DataTypeTransformer
 from src.orchestration.data_orchestrator import DataOrchestrator
 from src.data.ingestion.gold_ingestion import GoldIngestion
 from src.eda.churn_eda import ChurnEDA
+from src.data.validators.gold_validator import GoldValidator
 
 import mlflow
 
@@ -55,6 +56,10 @@ def main():
         repository=repository
     )
 
+    gold_validator = GoldValidator(
+        repository=repository
+)
+    
     data_orchestrator = DataOrchestrator(
         stages={
             "bronze": bronze_ingestion.ingest,
@@ -65,6 +70,7 @@ def main():
             "eda_target": churn_eda.analyze_target,
             "eda_missing": churn_eda.analyze_missing_values,
             "gold": gold_ingestion.ingest,
+            "validate_gold": gold_validator.validate_structure,
         }
     )
 
@@ -147,6 +153,13 @@ if __name__ == "__main__":
     )
 
     print(values_result)
+
+    # Validar estructura y consistencia entre Silver y Gold.
+    gold_validation_result = orchestrator.run(
+        stage="validate_gold"
+    )
+
+    print(gold_validation_result)
 
     target_result = orchestrator.run(
         stage="eda_target"
