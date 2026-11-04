@@ -6,11 +6,16 @@ from src.transformations.silver_transformation import SilverTransformation
 from src.data.validators.silver_validator import SilverValidator
 from src.transformations.data_type_transformer import DataTypeTransformer
 from src.orchestration.data_orchestrator import DataOrchestrator
-
+from src.data.ingestion.gold_ingestion import GoldIngestion
 from src.eda.churn_eda import ChurnEDA
 
+import mlflow
 
 def main():
+
+    mlflow.set_tracking_uri("http://localhost:5000")
+    mlflow.set_experiment("sdg_churn")
+
 
     repository = PostgresRepository(
         host="localhost",
@@ -46,6 +51,10 @@ def main():
         repository=repository
     )
 
+    gold_ingestion = GoldIngestion(
+        repository=repository
+    )
+
     data_orchestrator = DataOrchestrator(
         stages={
             "bronze": bronze_ingestion.ingest,
@@ -54,15 +63,16 @@ def main():
             "validate_silver_ids": silver_validator.validate_identifiers,
             "validate_silver_values": silver_validator.validate_values,
             "eda_target": churn_eda.analyze_target,
-            "eda_missing": churn_eda.analyze_missing_values
+            "eda_missing": churn_eda.analyze_missing_values,
+            "gold": gold_ingestion.ingest,
         }
     )
 
-    return data_orchestrator, silver_transformation
+    return data_orchestrator, silver_transformation, repository
 
 
 if __name__ == "__main__":
-    orchestrator, silver_transformation = main()
+    orchestrator, silver_transformation, repository = main()
 
     # Cargar los clientes en Bronze.
     bronze_result = orchestrator.run(
@@ -99,6 +109,21 @@ if __name__ == "__main__":
     )
 
     print(silver_result)
+
+    gold_batches = repository.read_batches(
+        schema="silver",
+        table="customers",
+        batch_size=1000
+    )
+
+    gold_result = orchestrator.run(
+        stage="gold",
+        batches=gold_batches,
+        column_types=column_types,
+        table_name="customers"
+    )
+
+    print(gold_result)
 
     validation_result = orchestrator.run(
         stage="validate_silver",

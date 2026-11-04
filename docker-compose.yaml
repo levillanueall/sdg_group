@@ -14,6 +14,27 @@ services:
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
+  
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.7.0
+    container_name: sdg_mlflow
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:5000:5000"
+
+    volumes:
+      - mlflow_data:/mlflow
+
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --allowed-hosts "localhost:5000,127.0.0.1:5000,mlflow:5000"
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --serve-artifacts
+      --artifacts-destination /mlflow/artifacts
 
 volumes:
   postgres_data:
+  mlflow_data:
