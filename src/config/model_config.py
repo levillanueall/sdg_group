@@ -1,0 +1,10 @@
+TARGET_COLUMN = "churn"
+
+ID_COLUMN = "Customer_ID"
+
+EXCLUDED_COLUMNS = [
+    TARGET_COLUMN,
+    ID_COLUMN
+]
+
+FEATURE_COLUMNS = None

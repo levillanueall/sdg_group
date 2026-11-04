@@ -9,6 +9,9 @@ from src.orchestration.data_orchestrator import DataOrchestrator
 from src.data.ingestion.gold_ingestion import GoldIngestion
 from src.eda.churn_eda import ChurnEDA
 from src.data.validators.gold_validator import GoldValidator
+from src.data.readers.gold_reader import GoldDatasetReader
+from src.modeling.churn_model import ChurnModelTrainer
+from src.tracking.mlflow_tracker import MLflowExperimentTracker
 
 import mlflow
 
@@ -58,7 +61,15 @@ def main():
 
     gold_validator = GoldValidator(
         repository=repository
-)
+    )
+
+    gold_reader = GoldDatasetReader(
+        repository=repository
+    )
+
+    churn_model = ChurnModelTrainer()
+
+    mlflow_tracker = MLflowExperimentTracker()
     
     data_orchestrator = DataOrchestrator(
         stages={
@@ -71,14 +82,28 @@ def main():
             "eda_missing": churn_eda.analyze_missing_values,
             "gold": gold_ingestion.ingest,
             "validate_gold": gold_validator.validate_structure,
+            "train_model": churn_model.train,
+            "track_model": mlflow_tracker.log_training,
         }
     )
 
-    return data_orchestrator, silver_transformation, repository
+    return (
+        data_orchestrator,
+        silver_transformation,
+        repository,
+        gold_reader,
+        churn_model
+    )
 
 
 if __name__ == "__main__":
-    orchestrator, silver_transformation, repository = main()
+    (
+        orchestrator,
+        silver_transformation,
+        repository,
+        gold_reader,
+        churn_model
+    ) = main()
 
     # Cargar los clientes en Bronze.
     bronze_result = orchestrator.run(
@@ -174,3 +199,27 @@ if __name__ == "__main__":
 
     for column_result in missing_result:
         print(column_result)
+
+    # Leer variables desde Gold utilizando model_config.py
+    gold_dataset = gold_reader.load(
+        batch_size=1000
+    )
+
+    print(f"Dataset de entrenamiento: {gold_dataset.shape}")
+
+    # Entrenar y evaluar el modelo mediante el orquestador.
+    training_result = orchestrator.run(
+        stage="train_model",
+        dataframe=gold_dataset
+    )
+
+    print(training_result)
+
+    # Registrar experimento en MLflow
+    tracking_result = orchestrator.run(
+        stage="track_model",
+        training_result=training_result,
+        model=churn_model.model
+    )
+
+    print(tracking_result)
