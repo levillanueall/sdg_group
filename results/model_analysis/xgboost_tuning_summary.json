@@ -1,0 +1,20 @@
+{
+    "algorithm": "XGBClassifier",
+    "scoring": "roc_auc",
+    "development_rows": 80000,
+    "reserved_test_rows": 20000,
+    "n_features": 98,
+    "n_iter": 20,
+    "n_splits": 3,
+    "best_cv_roc_auc": 0.6911669493570237,
+    "best_params": {
+        "classifier__subsample": 0.8,
+        "classifier__reg_lambda": 1.0,
+        "classifier__n_estimators": 450,
+        "classifier__min_child_weight": 5,
+        "classifier__max_depth": 4,
+        "classifier__learning_rate": 0.05,
+        "classifier__gamma": 0.1,
+        "classifier__colsample_bytree": 0.8
+    }
+}
