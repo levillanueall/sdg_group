@@ -195,9 +195,42 @@ class PostgresRepository:
             sql.SQL(", ").join(column_definitions)
         )
 
+        
         with self.connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(query)
+
+                # Obtener las columnas existentes
+                cursor.execute(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = %s
+                    AND table_name = %s
+                    """,
+                    (schema, table)
+                )
+
+                existing_columns = {
+                    row[0] for row in cursor.fetchall()
+                }
+
+                # Crear automáticamente las columnas faltantes
+                for column, column_type in column_types.items():
+
+                    if column in existing_columns:
+                        continue
+
+                    alter_query = sql.SQL(
+                        "ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}"
+                    ).format(
+                        sql.Identifier(schema, table),
+                        sql.Identifier(column),
+                        sql.SQL(postgres_types[column_type])
+                    )
+
+                    cursor.execute(alter_query)
+
     
     
     def count_rows(

@@ -205,14 +205,13 @@ class ChurnModelTrainer:
             "preprocessor"
         ]
 
-        self.feature_columns = selected_columns
 
         # 9. Consolidar resultados
         return {
             "algorithm": algorithm,
             "train_rows": len(train),
             "validation_rows": len(validation),
-            "features": self.feature_columns,
+            "features": selected_columns,
             "numeric_features": preprocessor.numeric_columns_,
             "categorical_features": preprocessor.categorical_columns_,
             "metrics": metrics

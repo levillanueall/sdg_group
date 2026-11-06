@@ -1,4 +1,7 @@
 
+import os
+import sys
+
 from src.data.repositories.postgres_repository import PostgresRepository
 from src.data.validators.data_validator import DataValidator
 from src.data.ingestion.bronze_ingestion import BronzeIngestion
@@ -17,6 +20,7 @@ from src.modeling.xgboost_hyperparameter_tuner import (
     XGBoostHyperparameterTuner
 )
 from src.modeling.data_splitter import ChurnDataSplitter
+from src.config.model_config import FEATURE_TYPES
 
 
 # ============================================================
@@ -29,13 +33,15 @@ def main():
     # BASE DE DATOS
     # --------------------------------------------------------
 
+    
     repository = PostgresRepository(
-        host="localhost",
-        port=5433,
-        database="sdg_churn",
-        user="sdg_user",
-        password="sdg_password"
+        host=os.getenv("POSTGRES_HOST", "localhost"),
+        port=int(os.getenv("POSTGRES_PORT", "5433")),
+        database=os.getenv("POSTGRES_DB", "sdg_churn"),
+        user=os.getenv("POSTGRES_USER", "sdg_user"),
+        password=os.getenv("POSTGRES_PASSWORD", "sdg_password")
     )
+
 
     # --------------------------------------------------------
     # BRONZE
@@ -119,13 +125,32 @@ def main():
     # DATA ORCHESTRATOR
     # --------------------------------------------------------
 
+    def run_gold_pipeline():
+
+        # Obtener los tipos de las columnas existentes
+        column_types = silver_transformation.build_column_types()
+
+        # Leer los datos de Silver
+        gold_batches = repository.read_batches(
+            schema="silver",
+            table="customers",
+            batch_size=1000
+        )
+
+        # Ejecutar Gold Ingestion
+        return gold_ingestion.ingest(
+            batches=gold_batches,
+            column_types=column_types,
+            table_name="customers"
+        )
+
     data_orchestrator = DataOrchestrator(
         stages={
 
             # Ingestion
             "bronze": bronze_ingestion.ingest,
             "silver": silver_ingestion.ingest,
-            "gold": gold_ingestion.ingest,
+            "gold": run_gold_pipeline,
 
             # Validaciones
             "validate_silver": (
@@ -239,17 +264,8 @@ def run_data_preparation(
     # GOLD INGESTION
     # --------------------------------------------------------
 
-    gold_batches = repository.read_batches(
-        schema="silver",
-        table="customers",
-        batch_size=1000
-    )
-
     gold_result = orchestrator.run(
-        stage="gold",
-        batches=gold_batches,
-        column_types=column_types,
-        table_name="customers"
+        stage="gold"
     )
 
     print(gold_result)
@@ -323,6 +339,36 @@ if __name__ == "__main__":
     ) = main()
 
     # --------------------------------------------------------
+    # EJECUCION INDEPENDIENTE DE GOLD
+    # --------------------------------------------------------
+
+    if len(sys.argv) > 1:
+
+        if len(sys.argv) != 2 or sys.argv[1] != "gold":
+            raise ValueError("Etapa no soportada")
+
+        print("\n--- EJECUTANDO GOLD ---", flush=True)
+
+        gold_result = orchestrator.run(
+            stage="gold"
+        )
+
+        print(gold_result)
+
+        validation_result = orchestrator.run(
+            stage="validate_gold"
+        )
+
+        print(validation_result)
+
+        if not validation_result["is_valid"]:
+            raise RuntimeError(
+                "Gold no superó las validaciones"
+            )
+
+        sys.exit(0)
+
+    # --------------------------------------------------------
     # CARGAR GOLD
     # --------------------------------------------------------
 
@@ -356,32 +402,22 @@ if __name__ == "__main__":
     # CONFIGURACION DE EXPERIMENTOS
     # --------------------------------------------------------
 
+    
     experiments = [
         {
-            "name": "Logistic Regression",
+            "name": "Logistic Regression - Baseline",
             "algorithm": "logistic_regression",
-            "model_params": None
+            "model_params": None,
+            "use_engineered_features": False
         },
         {
-            "name": "XGBoost",
-            "algorithm": "xgboost",
-            "model_params": None
-        },
-        {
-            "name": "XGBoost Optimizado",
-            "algorithm": "xgboost",
-            "model_params": {
-                "n_estimators": 450,
-                "max_depth": 4,
-                "learning_rate": 0.05,
-                "min_child_weight": 5,
-                "gamma": 0.1,
-                "subsample": 0.8,
-                "colsample_bytree": 0.8,
-                "reg_lambda": 1.0
-            }
+            "name": "Logistic Regression - Feature Engineering",
+            "algorithm": "logistic_regression",
+            "model_params": None,
+            "use_engineered_features": True
         }
     ]
+
 
     # --------------------------------------------------------
     # ENTRENAMIENTO Y TRACKING
@@ -396,16 +432,42 @@ if __name__ == "__main__":
             flush=True
         )
 
-        # Entrenamiento mediante el orquestador
+        # Seleccionar variables para el experimento
+        excluded_features = (
+            []
+            if experiment["use_engineered_features"]
+            else list(FEATURE_TYPES)
+        )
+
+        experiment_train = datasets["train"].drop(
+            columns=excluded_features
+        )
+
+        experiment_validation = datasets["validation"].drop(
+            columns=excluded_features
+        )
+
+        print(
+            f"Variables utilizadas: "
+            f"{experiment_train.shape[1] - 1}"
+        )
+
+        # ----------------------------------------------------
+        # ENTRENAMIENTO MEDIANTE EL ORQUESTADOR
+        # ----------------------------------------------------
+
         training_result = orchestrator.run(
             stage="train_model",
-            train=datasets["train"],
-            validation=datasets["validation"],
+            train=experiment_train,
+            validation=experiment_validation,
             algorithm=experiment["algorithm"],
             model_params=experiment["model_params"]
         )
 
-        # Mostrar metricas
+        # ----------------------------------------------------
+        # METRICAS DE VALIDACION
+        # ----------------------------------------------------
+
         print("\n--- METRICAS VALIDATION ---")
 
         for metric, value in (
@@ -422,14 +484,12 @@ if __name__ == "__main__":
             flush=True
         )
 
-        
         tracking_result = orchestrator.run(
             stage="track_model",
             training_result=training_result,
             model=churn_model.model,
             run_name=experiment["name"]
         )
-
 
         print(
             f"Run ID: {tracking_result['run_id']}"

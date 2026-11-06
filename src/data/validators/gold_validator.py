@@ -1,5 +1,5 @@
 from src.data.repositories.postgres_repository import PostgresRepository
-
+from src.config.model_config import FEATURE_TYPES
 
 class GoldValidator:
 
@@ -37,6 +37,8 @@ class GoldValidator:
         silver_names = set(silver_columns)
         gold_names = set(gold_columns)
 
+        expected_gold_names = silver_names | set(FEATURE_TYPES)
+
         type_mismatches = {}
 
         for column in silver_names & gold_names:
@@ -51,7 +53,7 @@ class GoldValidator:
 
         checks = {
             "row_count": silver_rows > 0 and silver_rows == gold_rows,
-            "columns": silver_names == gold_names,
+            "columns": gold_names == expected_gold_names,
             "types": not type_mismatches
         }
 
@@ -67,8 +69,8 @@ class GoldValidator:
                 "gold": len(gold_columns)
             },
             "column_differences": {
-                "missing_in_gold": sorted(silver_names - gold_names),
-                "extra_in_gold": sorted(gold_names - silver_names)
+                "missing_in_gold": sorted(expected_gold_names - gold_names),
+                "extra_in_gold": sorted(gold_names - expected_gold_names)
             },
             "type_mismatches": type_mismatches
         }

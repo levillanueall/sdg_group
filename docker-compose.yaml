@@ -34,7 +34,52 @@ services:
       --backend-store-uri sqlite:////mlflow/mlflow.db
       --serve-artifacts
       --artifacts-destination /mlflow/artifacts
+    
+  
+  
+  
+  airflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    image: sdg-airflow:3.3.2
+
+    container_name: sdg_airflow
+    restart: unless-stopped
+
+    command: standalone
+
+    ports:
+      - "127.0.0.1:8083:8080"
+
+    
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAG_DISCOVERY_SAFE_MODE: "false"
+
+      # PostgreSQL
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: sdg_churn
+      POSTGRES_USER: sdg_user
+      POSTGRES_PASSWORD: sdg_password
+
+      # MLflow
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_EXPERIMENT_NAME: SDG_Churn_Model_Comparison
+
+
+    volumes:
+      - airflow_data:/opt/airflow
+      - ./dags:/opt/airflow/dags
+      - ./:/opt/airflow/project
+
+    depends_on:
+      - postgres
+      - mlflow
+
 
 volumes:
   postgres_data:
   mlflow_data:
+  airflow_data:
