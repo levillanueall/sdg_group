@@ -5,7 +5,7 @@ from pathlib import Path
 
 import mlflow
 import mlflow.sklearn
-
+from mlflow import MlflowClient
 
 class MLflowExperimentTracker:
 
@@ -103,12 +103,15 @@ class MLflowExperimentTracker:
 
 
     
+    
     def log_training(
         self,
         training_result: dict,
         model,
-        run_name: str | None = None
+        run_name: str | None = None,
+        tags: dict | None = None
     ) -> dict:
+
 
 
         # 1. Identificar el algoritmo entrenado
@@ -146,12 +149,116 @@ class MLflowExperimentTracker:
         })
 
         # 6. Registrar el experimento
+        
         return self.log_experiment(
-            
             run_name=run_name or f"{algorithm}_all_features",
-
             params=params,
             metrics=training_result["metrics"],
             model=model,
+            tags=tags,
             model_name="churn_all_features"
         )
+
+
+    
+    def select_best_model(self, run_group_id: str) -> dict:
+
+        mlflow.set_tracking_uri(self.tracking_uri)
+
+        client = MlflowClient()
+
+        experiment = client.get_experiment_by_name(
+            self.experiment_name
+        )
+
+        if experiment is None:
+            raise ValueError(
+                f"Experimento inexistente: {self.experiment_name}"
+            )
+
+        # Consultar solo los candidatos de esta ejecución
+        runs = client.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            filter_string=(
+                f"tags.run_group_id = '{run_group_id}' "
+                "AND tags.split_version = "
+                "'customer_id_stratified_v1' "
+                "AND tags.evaluation_role = 'candidate'"
+            ),
+            max_results=1000
+        )
+
+        # Considerar únicamente ejecuciones exitosas
+        candidates = [
+            run for run in runs
+            if run.info.status == "FINISHED"
+            and "roc_auc" in run.data.metrics
+        ]
+
+        expected_models = {
+            "Logistic Regression - Baseline",
+            "Logistic Regression - Feature Engineering",
+            "XGBoost Optimizado - Baseline",
+            "XGBoost Optimizado - Feature Engineering"
+        }
+
+        available_models = {
+            run.info.run_name for run in candidates
+        }
+
+        missing_models = expected_models - available_models
+
+        if missing_models:
+            raise ValueError(
+                f"Modelos candidatos faltantes: {missing_models}"
+            )
+
+        # Seleccionar el mejor ROC-AUC de Validation
+        best_run = max(
+            candidates,
+            key=lambda run: run.data.metrics["roc_auc"]
+        )
+
+        # Recuperar el modelo almacenado en MLflow
+        logged_models = client.search_logged_models(
+            experiment_ids=[experiment.experiment_id],
+            filter_string=(
+                f"source_run_id = '{best_run.info.run_id}'"
+            ),
+            max_results=10
+        )
+
+        if not logged_models:
+            raise ValueError(
+                "El modelo ganador no está almacenado en MLflow."
+            )
+
+        model_uri = f"models:/{logged_models[0].model_id}"
+
+        return {
+            "run_group_id": run_group_id,
+            "run_id": best_run.info.run_id,
+            "model_name": best_run.info.run_name,
+            "model_uri": model_uri,
+            "validation_roc_auc": best_run.data.metrics["roc_auc"],
+            "features": best_run.data.params["features"].split(",")
+        }
+
+    
+    def load_model(self, model_uri: str):
+
+        if not model_uri:
+            raise ValueError(
+                "No se proporcionó el URI del modelo."
+            )
+
+        # Configurar conexión a MLflow
+        mlflow.set_tracking_uri(self.tracking_uri)
+
+        # Recuperar el pipeline entrenado
+        model = mlflow.sklearn.load_model(
+            model_uri
+        )
+
+        return model
+

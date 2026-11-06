@@ -2,7 +2,7 @@ import pandas as pd
 
 from sklearn.model_selection import train_test_split
 
-from src.config.model_config import TARGET_COLUMN
+from src.config.model_config import TARGET_COLUMN, ID_COLUMN
 
 
 class ChurnDataSplitter:
@@ -24,18 +24,30 @@ class ChurnDataSplitter:
                 f"No se encontró la variable {TARGET_COLUMN}"
             )
 
-        row_hash = pd.util.hash_pandas_object(
-            dataframe,
-            index=False
-        )
 
+        # Validar el identificador del cliente
+        if ID_COLUMN not in dataframe.columns:
+            raise ValueError(
+                f"No existe la columna {ID_COLUMN}"
+            )
+
+        if dataframe[ID_COLUMN].isna().any():
+            raise ValueError(
+                "Existen identificadores nulos."
+            )
+
+        if dataframe[ID_COLUMN].duplicated().any():
+            raise ValueError(
+                "Existen identificadores duplicados."
+            )
+
+        # Ordenamiento estable por Customer_ID
         ordered_data = (
             dataframe
-            .assign(_row_hash=row_hash)
-            .sort_values("_row_hash", kind="stable")
-            .drop(columns="_row_hash")
+            .sort_values(ID_COLUMN, kind="stable")
             .reset_index(drop=True)
         )
+
 
         train_validation, test = train_test_split(
             ordered_data,

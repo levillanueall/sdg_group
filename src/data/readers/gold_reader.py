@@ -4,7 +4,8 @@ from src.data.repositories.postgres_repository import PostgresRepository
 from src.config.model_config import (
     FEATURE_COLUMNS,
     TARGET_COLUMN,
-    EXCLUDED_COLUMNS
+    EXCLUDED_COLUMNS,
+    ID_COLUMN
 )
 
 
@@ -50,7 +51,7 @@ class GoldDatasetReader:
                             "No hay variables predictoras."
                         )
 
-                    columns = features + [TARGET_COLUMN]
+                    columns = [ID_COLUMN] + features + [TARGET_COLUMN]
 
                     missing = [
                         col for col in columns

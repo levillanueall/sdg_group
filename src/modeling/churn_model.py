@@ -217,6 +217,71 @@ class ChurnModelTrainer:
             "metrics": metrics
         }
 
+    
+    @staticmethod
+    def evaluate_test(
+        model,
+        test: pd.DataFrame,
+        features: list[str]
+    ) -> dict:
+
+        # 1. Validar las variables necesarias
+        required_columns = features + [TARGET_COLUMN]
+
+        missing_columns = [
+            col for col in required_columns
+            if col not in test.columns
+        ]
+
+        if missing_columns:
+            raise ValueError(
+                f"Columnas faltantes en Test: {missing_columns}"
+            )
+
+        if not features:
+            raise ValueError(
+                "No se recibieron variables predictoras."
+            )
+
+        # 2. Separar X e y
+        X_test = test[features].copy()
+
+        y_test = pd.to_numeric(
+            test[TARGET_COLUMN],
+            errors="raise"
+        )
+
+        if (
+            y_test.isna().any()
+            or not y_test.isin([0, 1]).all()
+            or y_test.nunique() != 2
+        ):
+            raise ValueError(
+                "La variable objetivo de Test no es válida."
+            )
+
+        y_test = y_test.astype(int)
+
+        # 3. Generar predicciones con el modelo entrenado
+        predictions = model.predict(X_test)
+
+        probabilities = model.predict_proba(X_test)[:, 1]
+
+        # 4. Calcular métricas
+        metrics = ChurnMetrics.calculate(
+            y_true=y_test,
+            predictions=predictions,
+            probabilities=probabilities
+        )
+
+        # 5. Devolver resultados
+        return {
+            "test_rows": len(test),
+            "features": features,
+            "metrics": metrics
+        }
+
+
 
 
 

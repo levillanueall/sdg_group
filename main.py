@@ -1,6 +1,7 @@
 
 import os
 import sys
+from uuid import uuid4
 
 from src.data.repositories.postgres_repository import PostgresRepository
 from src.data.validators.data_validator import DataValidator
@@ -20,7 +21,10 @@ from src.modeling.xgboost_hyperparameter_tuner import (
     XGBoostHyperparameterTuner
 )
 from src.modeling.data_splitter import ChurnDataSplitter
-from src.config.model_config import FEATURE_TYPES
+from src.config.model_config import (
+    FEATURE_TYPES,
+    EXCLUDED_COLUMNS
+)
 
 
 # ============================================================
@@ -174,12 +178,19 @@ def main():
             "load_gold": gold_reader.load,
             "split_data": data_splitter.split,
 
+            
             # Modelado
             "train_model": churn_model.train,
             "tune_model": xgboost_tuner.tune,
+            "evaluate_test": churn_model.evaluate_test,
 
+
+            
             # MLflow
-            "track_model": mlflow_tracker.log_training
+            "track_model": mlflow_tracker.log_training,
+            "select_best_model": mlflow_tracker.select_best_model,
+            "load_model": mlflow_tracker.load_model
+
         }
     )
 
@@ -403,6 +414,18 @@ if __name__ == "__main__":
     # --------------------------------------------------------
 
     
+
+    xgboost_params = {
+        "n_estimators": 450,
+        "max_depth": 4,
+        "learning_rate": 0.05,
+        "min_child_weight": 5,
+        "gamma": 0.1,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 1.0
+    }
+
     experiments = [
         {
             "name": "Logistic Regression - Baseline",
@@ -415,8 +438,21 @@ if __name__ == "__main__":
             "algorithm": "logistic_regression",
             "model_params": None,
             "use_engineered_features": True
+        },
+        {
+            "name": "XGBoost Optimizado - Baseline",
+            "algorithm": "xgboost",
+            "model_params": xgboost_params,
+            "use_engineered_features": False
+        },
+        {
+            "name": "XGBoost Optimizado - Feature Engineering",
+            "algorithm": "xgboost",
+            "model_params": xgboost_params,
+            "use_engineered_features": True
         }
     ]
+
 
 
     # --------------------------------------------------------
@@ -424,6 +460,15 @@ if __name__ == "__main__":
     # --------------------------------------------------------
 
     experiment_results = []
+
+    
+    run_group_id = (
+        os.getenv("SDG_RUN_GROUP_ID")
+        or uuid4().hex
+    )
+
+    print(f"\nGrupo de entrenamiento: {run_group_id}")
+
 
     for experiment in experiments:
 
@@ -449,7 +494,7 @@ if __name__ == "__main__":
 
         print(
             f"Variables utilizadas: "
-            f"{experiment_train.shape[1] - 1}"
+            f"{experiment_train.shape[1] - len(EXCLUDED_COLUMNS)}"
         )
 
         # ----------------------------------------------------
@@ -484,12 +529,24 @@ if __name__ == "__main__":
             flush=True
         )
 
+        
         tracking_result = orchestrator.run(
             stage="track_model",
             training_result=training_result,
             model=churn_model.model,
-            run_name=experiment["name"]
+            run_name=experiment["name"],
+            tags={
+                "run_group_id": run_group_id,
+                "split_version": "customer_id_stratified_v1",
+                "feature_set": (
+                    "engineered"
+                    if experiment["use_engineered_features"]
+                    else "baseline"
+                ),
+                "evaluation_role": "candidate"
+            }
         )
+
 
         print(
             f"Run ID: {tracking_result['run_id']}"

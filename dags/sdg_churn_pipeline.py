@@ -6,6 +6,9 @@ import sys
 import pendulum
 from airflow.sdk import dag, task
 
+import os
+from airflow.sdk import dag, task, get_current_context
+
 
 PROJECT_DIR = Path("/opt/airflow/project")
 
@@ -161,19 +164,132 @@ def sdg_churn_pipeline():
                 "Gold no supero las validaciones"
             )
 
+    
     @task
     def train_and_track():
-        """
-        Reutiliza el entrenamiento y el registro
-        en MLflow existentes en main.py.
-        """
+
+        # Identificador único de esta ejecución del DAG
+        context = get_current_context()
+        run_group_id = context["ti"].run_id
+
+        # Compartir identificador con main.py
+        env = os.environ.copy()
+        env["SDG_RUN_GROUP_ID"] = run_group_id
+
+        print(f"Grupo MLflow: {run_group_id}")
+
+        # Ejecutar entrenamiento existente
         subprocess.run(
             [sys.executable, "-X", "utf8", "main.py"],
             cwd=str(PROJECT_DIR),
+            env=env,
             check=True
         )
 
+        return run_group_id
+
+    
+    @task
+    def select_best_model(run_group_id: str):
+
+        orchestrator, *_ = get_components()
+
+        best_model = orchestrator.run(
+            stage="select_best_model",
+            run_group_id=run_group_id
+        )
+
+        print("\n--- MEJOR MODELO SELECCIONADO ---")
+        print(f"Modelo: {best_model['model_name']}")
+        print(f"Run ID: {best_model['run_id']}")
+        print(f"Model URI: {best_model['model_uri']}")
+        print(
+            f"ROC-AUC Validation: "
+            f"{best_model['validation_roc_auc']:.6f}"
+        )
+
+        return best_model
+
+    
+    @task
+    def evaluate_test(best_model: dict):
+
+        # Verificar que el modelo pertenece a esta ejecución
+        context = get_current_context()
+        run_group_id = context["ti"].run_id
+
+        if best_model["run_group_id"] != run_group_id:
+            raise ValueError(
+                "El modelo seleccionado no pertenece "
+                "a la ejecución actual de Airflow."
+            )
+
+        orchestrator, *_ = get_components()
+
+        # 1. Recuperar Gold
+        gold_dataset = orchestrator.run(
+            stage="load_gold",
+            batch_size=1000
+        )
+
+        # 2. Reconstruir las mismas particiones
+        datasets = orchestrator.run(
+            stage="split_data",
+            dataframe=gold_dataset
+        )
+
+        test_dataset = datasets["test"]
+
+        # 3. Recuperar el modelo ganador desde MLflow
+        model = orchestrator.run(
+            stage="load_model",
+            model_uri=best_model["model_uri"]
+        )
+
+        # 4. Evaluación final sin reentrenamiento
+        result = orchestrator.run(
+            stage="evaluate_test",
+            model=model,
+            test=test_dataset,
+            features=best_model["features"]
+        )
+
+        # 5. Mostrar resultados en los logs de Airflow
+        print("\n--- EVALUACION FINAL TEST ---")
+        print(f"Modelo: {best_model['model_name']}")
+        print(f"Run ID: {best_model['run_id']}")
+        print(f"Registros Test: {result['test_rows']}")
+        print(
+            f"ROC-AUC Validation: "
+            f"{best_model['validation_roc_auc']:.6f}"
+        )
+
+        for metric, value in result["metrics"].items():
+            print(f"Test {metric}: {value:.6f}")
+
+        return {
+            "model_name": best_model["model_name"],
+            "run_id": best_model["run_id"],
+            "test_rows": result["test_rows"],
+            "metrics": result["metrics"]
+        }
+
+
+
+    
+    
     # Dependencias entre tareas
+
+    training_task = train_and_track()
+
+    best_model_task = select_best_model(
+        training_task
+    )
+
+    evaluate_test(
+        best_model_task
+    )
+
     (
         bronze_customers()
         >> bronze_descriptions()
@@ -181,8 +297,9 @@ def sdg_churn_pipeline():
         >> validate_silver()
         >> gold_ingestion()
         >> validate_gold()
-        >> train_and_track()
+        >> training_task
     )
+
 
 
 sdg_churn_pipeline()
